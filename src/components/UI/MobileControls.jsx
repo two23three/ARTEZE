@@ -69,7 +69,7 @@ export default function MobileControls({ onMove, onRotate, characterPosition, is
       if (magnitude < 5) return; // Dead zone
       
       const normalizedMagnitude = Math.min(magnitude / MAX_DISTANCE, 1);
-      const speed = normalizedMagnitude * 0.5; // MUCH faster - was 0.12, now 0.5
+      const speed = normalizedMagnitude * 0.15; // Much slower - was 0.5, now 0.15
       
       // Calculate movement direction relative to joystick
       const moveRight = (currentPos.x / MAX_DISTANCE) * speed;
@@ -125,15 +125,22 @@ export default function MobileControls({ onMove, onRotate, characterPosition, is
     const deltaX = touch.clientX - lastCameraPos.current.x;
     const deltaY = touch.clientY - lastCameraPos.current.y;
     
-    // Camera sensitivity
-    const sensitivity = 0.005;
+    // Much lower sensitivity and better dead zones
+    const horizontalSensitivity = 0.003; // Reduced from 0.005
+    const verticalSensitivity = 0.002;   // Even lower for vertical
     
-    // Apply camera rotation
-    if (Math.abs(deltaX) > 1) {
-      onRotate('horizontal', -deltaX * sensitivity);
+    // Dead zones to prevent accidental movement
+    const horizontalDeadZone = 3;
+    const verticalDeadZone = 5;
+    
+    // Only apply horizontal rotation if movement is primarily horizontal
+    if (Math.abs(deltaX) > horizontalDeadZone && Math.abs(deltaX) > Math.abs(deltaY)) {
+      onRotate('horizontal', -deltaX * horizontalSensitivity);
     }
-    if (Math.abs(deltaY) > 1) {
-      onRotate('vertical', -deltaY * sensitivity);
+    
+    // Only apply vertical rotation if movement is primarily vertical
+    if (Math.abs(deltaY) > verticalDeadZone && Math.abs(deltaY) > Math.abs(deltaX)) {
+      onRotate('vertical', -deltaY * verticalSensitivity);
     }
     
     lastCameraPos.current = { x: touch.clientX, y: touch.clientY };
@@ -217,22 +224,28 @@ export default function MobileControls({ onMove, onRotate, characterPosition, is
         onTouchEnd={handleCameraEnd}
         onTouchCancel={handleCameraEnd}
       >
-        {/* Subtle indicator */}
+        {/* Subtle indicator with better instructions */}
         <div style={{
           position: 'absolute',
           top: '10px',
           right: '10px',
-          fontSize: '12px',
-          color: 'rgba(255, 255, 255, 0.5)',
+          fontSize: '11px',
+          color: 'rgba(255, 255, 255, 0.6)',
           pointerEvents: 'none',
-          opacity: cameraActive ? 1 : 0.3,
-          transition: 'opacity 0.2s ease'
+          opacity: cameraActive ? 1 : 0.4,
+          transition: 'opacity 0.2s ease',
+          textAlign: 'right',
+          lineHeight: '1.3'
         }}>
-          👀 Look around
+          👀 Look around<br/>
+          <span style={{ fontSize: '10px', opacity: 0.8 }}>
+            Swipe horizontal ← → to turn<br/>
+            Swipe vertical ↑ ↓ to look up/down
+          </span>
         </div>
       </div>
 
-      {/* Instructions with debug info */}
+      {/* Instructions with improved guidance */}
       <div style={{
         position: 'absolute',
         bottom: '100px',
@@ -240,9 +253,15 @@ export default function MobileControls({ onMove, onRotate, characterPosition, is
         fontSize: '11px',
         color: 'rgba(255, 255, 255, 0.7)',
         pointerEvents: 'none',
-        textShadow: '1px 1px 2px rgba(0, 0, 0, 0.8)'
+        textShadow: '1px 1px 2px rgba(0, 0, 0, 0.8)',
+        lineHeight: '1.3'
       }}>
-        Move {joystickActive && `(${Math.round(joystickPosition.x)}, ${Math.round(joystickPosition.y)})`}
+        <div style={{ fontWeight: 'bold', marginBottom: '2px' }}>Move</div>
+        {joystickActive && (
+          <div style={{ fontSize: '10px', opacity: 0.8 }}>
+            ({Math.round(joystickPosition.x)}, {Math.round(joystickPosition.y)})
+          </div>
+        )}
       </div>
     </div>
   );
