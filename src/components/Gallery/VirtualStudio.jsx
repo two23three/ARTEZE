@@ -148,18 +148,22 @@ export default function VirtualStudio() {
       const movementX = event.movementX || 0;
       const movementY = event.movementY || 0;
 
-      // FIXED: Proper sensitivity for smooth movement
-      const sensitivity = 0.002;
+      // Much lower sensitivity like mobile - was 0.002, now 0.001
+      const horizontalSensitivity = 0.001;
+      const verticalSensitivity = 0.0008; // Even lower for vertical
 
-      // Rotate character body for left/right look
-      setCharacterRotation(prev => prev - movementX * sensitivity);
+      // Dead zones to prevent tiny jittery movements
+      if (Math.abs(movementX) > 1) {
+        setCharacterRotation(prev => prev - movementX * horizontalSensitivity);
+      }
       
-      // Rotate camera for up/down look with proper clamping
-      setCameraRotation(prev => {
-        const newRotation = prev - movementY * sensitivity;
-        // Clamp between -90 and +90 degrees (looking down to looking up)
-        return Math.max(-Math.PI/2, Math.min(Math.PI/2, newRotation));
-      });
+      if (Math.abs(movementY) > 1) {
+        setCameraRotation(prev => {
+          const newRotation = prev - movementY * verticalSensitivity;
+          // Clamp between -90 and +90 degrees (looking down to looking up)
+          return Math.max(-Math.PI/2, Math.min(Math.PI/2, newRotation));
+        });
+      }
     };
 
     const handleKeyDown = (event) => {
