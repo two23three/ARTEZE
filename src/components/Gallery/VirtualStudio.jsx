@@ -1,4 +1,4 @@
-// src/components/Gallery/VirtualStudio.jsx - Updated with Supabase Integration
+// src/components/Gallery/VirtualStudio.jsx - With Admin Mode
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 
@@ -12,31 +12,96 @@ import Portrait from './Portrait';
 import Instructions from '../UI/Instructions';
 import MobileControls from '../UI/MobileControls';
 import ArtworkDetail from '../UI/ArtworkDetail';
+import { AdminToolbar, ArtworkEditPanel } from '../Admin/GalleryAdminMode';
 
 // Import hooks and utilities
 import { useArtistGallery } from '../../hooks/useArtistGallery';
 import { useAnalytics } from '../../hooks/useAnalytics';
+import { supabase } from '../../lib/supabase';
 
 // Helper function to extract subdomain
 function getSubdomain() {
   const hostname = window.location.hostname;
   const parts = hostname.split('.');
   
-  // For development (localhost), default to 'samok'
   if (hostname === 'localhost' || hostname === '127.0.0.1') {
-    return 'samok'; // Default to samo.k's gallery for testing
+    return 'samok';
   }
   
-  // For production (subdomain.arteze.com)
   if (parts.length >= 3) {
-    return parts[0]; // Return subdomain
+    return parts[0];
   }
   
-  // For main domain (arteze.com)
   return null;
 }
 
-// Loading component
+// Check if user is the artist (simple auth check)
+function useArtistAuth(artistId) {
+  const [isArtist, setIsArtist] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    // For now, simple localStorage check
+    // In production, this would be proper authentication
+    const isAuthenticated = localStorage.getItem('artist-auth') === artistId;
+    setIsArtist(isAuthenticated);
+    setLoading(false);
+  }, [artistId]);
+
+  const login = () => {
+    // Simple demo login - in production use proper auth
+    const password = prompt('Enter artist password:');
+    if (password === 'artist123') {
+      localStorage.setItem('artist-auth', artistId);
+      setIsArtist(true);
+    }
+  };
+
+  const logout = () => {
+    localStorage.removeItem('artist-auth');
+    setIsArtist(false);
+  };
+
+  return { isArtist, loading, login, logout };
+}
+
+// Generate default positions for new artworks
+function generateDefaultPosition(existingArtworks) {
+  const wallPositions = [
+    // Back wall
+    { x: -6, y: 2.5, z: -9.8, rotation: [0, 0, 0] },
+    { x: -3, y: 2.5, z: -9.8, rotation: [0, 0, 0] },
+    { x: 0, y: 2.5, z: -9.8, rotation: [0, 0, 0] },
+    { x: 3, y: 2.5, z: -9.8, rotation: [0, 0, 0] },
+    { x: 6, y: 2.5, z: -9.8, rotation: [0, 0, 0] },
+    // Left wall
+    { x: -9.8, y: 2.5, z: -6, rotation: [0, Math.PI / 2, 0] },
+    { x: -9.8, y: 2.5, z: -3, rotation: [0, Math.PI / 2, 0] },
+    { x: -9.8, y: 2.5, z: 0, rotation: [0, Math.PI / 2, 0] },
+    { x: -9.8, y: 2.5, z: 3, rotation: [0, Math.PI / 2, 0] },
+    // Right wall
+    { x: 9.8, y: 2.5, z: -6, rotation: [0, -Math.PI / 2, 0] },
+    { x: 9.8, y: 2.5, z: -3, rotation: [0, -Math.PI / 2, 0] },
+    { x: 9.8, y: 2.5, z: 0, rotation: [0, -Math.PI / 2, 0] },
+    { x: 9.8, y: 2.5, z: 3, rotation: [0, -Math.PI / 2, 0] }
+  ];
+
+  // Find first available position
+  for (const pos of wallPositions) {
+    const occupied = existingArtworks.some(artwork => 
+      Math.abs(artwork.position[0] - pos.x) < 1 && 
+      Math.abs(artwork.position[2] - pos.z) < 1
+    );
+    if (!occupied) {
+      return { position: [pos.x, pos.y, pos.z], rotation: pos.rotation };
+    }
+  }
+
+  // If no space, place in center
+  return { position: [0, 2.5, -5], rotation: [0, 0, 0] };
+}
+
+// Loading and Error components (same as before)
 function LoadingScreen() {
   return (
     <div style={{
@@ -57,7 +122,6 @@ function LoadingScreen() {
   );
 }
 
-// Error component
 function ErrorScreen({ error, subdomain }) {
   return (
     <div style={{
@@ -83,7 +147,7 @@ function ErrorScreen({ error, subdomain }) {
   );
 }
 
-// Movement handler component
+// Movement handler (same as before)
 function MovementHandler({ 
   keysPressed, 
   characterPosition, 
@@ -156,16 +220,13 @@ function MovementHandler({
 }
 
 export default function VirtualStudio() {
-  // Get subdomain from URL
   const subdomain = getSubdomain();
-  
-  // Fetch gallery data from Supabase
-  const { artist, artworks, loading, error } = useArtistGallery(subdomain);
-  
-  // Analytics tracking
+  const { artist, artworks, loading, error, refetch } = useArtistGallery(subdomain);
+  const { isArtist, loading: authLoading, login } = useArtistAuth(artist?.id);
   const { startGalleryVisit, trackArtworkInteraction, endGalleryVisit } = useAnalytics();
   
-  // Component state
+  // Gallery state
+  const [localArtworks, setLocalArtworks] = useState([]);
   const [characterPosition, setCharacterPosition] = useState([0, 0, 5]);
   const [characterRotation, setCharacterRotation] = useState(0);
   const [cameraRotation, setCameraRotation] = useState(0);
@@ -176,11 +237,23 @@ export default function VirtualStudio() {
   const [walkingSpeed, setWalkingSpeed] = useState(0);
   const [viewedArtworks, setViewedArtworks] = useState(new Set());
   
-  // Movement state tracking
+  // Admin state
+  const [isAdminMode, setIsAdminMode] = useState(false);
+  const [editingArtwork, setEditingArtwork] = useState(null);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  
+  // Movement state
   const keysPressed = useRef(new Set());
   const isPointerLocked = useRef(false);
 
-  // Detect mobile device
+  // Update local artworks when data changes
+  useEffect(() => {
+    if (artworks) {
+      setLocalArtworks(artworks);
+    }
+  }, [artworks]);
+
+  // Mobile detection
   useEffect(() => {
     const checkMobile = () => {
       setIsMobile(/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent));
@@ -191,13 +264,12 @@ export default function VirtualStudio() {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  // Start analytics tracking when gallery loads
+  // Analytics tracking
   useEffect(() => {
     if (artist && !loading) {
       startGalleryVisit(artist.id);
       sessionStorage.setItem('visit-start-time', Date.now().toString());
       
-      // Track page visibility to end visit when user leaves
       const handleVisibilityChange = () => {
         if (document.visibilityState === 'hidden') {
           endGalleryVisit(viewedArtworks.size);
@@ -213,7 +285,193 @@ export default function VirtualStudio() {
     }
   }, [artist, loading]);
 
-  // Pointer lock setup for desktop
+  // Admin mode functions
+  const handleToggleAdmin = () => {
+    if (!isArtist) {
+      login();
+    } else {
+      setIsAdminMode(!isAdminMode);
+      setEditingArtwork(null);
+    }
+  };
+
+  const handleAddArtwork = async () => {
+    if (!artist) return;
+
+    const defaultPos = generateDefaultPosition(localArtworks);
+    
+    try {
+      const { data, error } = await supabase
+        .from('artworks')
+        .insert([{
+          artist_id: artist.id,
+          title: 'New Artwork',
+          description: 'Description for new artwork',
+          medium: 'Mixed Media',
+          dimensions: '24" x 36"',
+          year: new Date().getFullYear(),
+          position_x: defaultPos.position[0],
+          position_y: defaultPos.position[1],
+          position_z: defaultPos.position[2],
+          rotation_x: defaultPos.rotation[0],
+          rotation_y: defaultPos.rotation[1],
+          rotation_z: defaultPos.rotation[2],
+          is_visible: true,
+          is_for_sale: false,
+          display_order: localArtworks.length + 1
+        }])
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // Add to local state
+      const newArtwork = {
+        id: data.id,
+        title: data.title,
+        description: data.description,
+        medium: data.medium,
+        dimensions: data.dimensions,
+        year: data.year,
+        position: defaultPos.position,
+        rotation: defaultPos.rotation,
+        imageUrl: null,
+        thumbnailUrl: null,
+        hiresUrl: null,
+        price: null,
+        isForSale: data.is_for_sale,
+        isVisible: data.is_visible,
+        viewCount: 0,
+        detailViewCount: 0,
+        displayOrder: data.display_order
+      };
+
+      setLocalArtworks(prev => [...prev, newArtwork]);
+      setEditingArtwork(newArtwork);
+      setHasUnsavedChanges(true);
+    } catch (error) {
+      console.error('Error adding artwork:', error);
+      alert('Failed to add artwork: ' + error.message);
+    }
+  };
+
+  const handleUpdateArtwork = async (artworkId, updates) => {
+    try {
+      // Update local state immediately
+      setLocalArtworks(prev => prev.map(artwork => 
+        artwork.id === artworkId ? { ...artwork, ...updates } : artwork
+      ));
+
+      // Update in database
+      const { error } = await supabase
+        .from('artworks')
+        .update({
+          title: updates.title,
+          description: updates.description,
+          medium: updates.medium,
+          dimensions: updates.dimensions,
+          year: updates.year,
+          is_visible: updates.isVisible,
+          is_for_sale: updates.isForSale,
+          price_usd: updates.price ? parseFloat(updates.price) : null
+        })
+        .eq('id', artworkId);
+
+      if (error) throw error;
+
+      setHasUnsavedChanges(false);
+      setEditingArtwork(null);
+    } catch (error) {
+      console.error('Error updating artwork:', error);
+      alert('Failed to update artwork: ' + error.message);
+    }
+  };
+
+  const handleDeleteArtwork = async (artworkId) => {
+    try {
+      const { error } = await supabase
+        .from('artworks')
+        .delete()
+        .eq('id', artworkId);
+
+      if (error) throw error;
+
+      setLocalArtworks(prev => prev.filter(artwork => artwork.id !== artworkId));
+      setEditingArtwork(null);
+      setSelectedArtwork(null);
+      setHasUnsavedChanges(false);
+    } catch (error) {
+      console.error('Error deleting artwork:', error);
+      alert('Failed to delete artwork: ' + error.message);
+    }
+  };
+
+  const handleSaveChanges = async () => {
+    // Save any pending changes
+    await refetch();
+    setHasUnsavedChanges(false);
+  };
+
+  // Artwork interaction handlers
+  const handleArtworkClick = useCallback(async (artworkId) => {
+    const artwork = localArtworks.find(art => art.id === artworkId);
+    if (!artwork) return;
+
+    if (isAdminMode) {
+      // In admin mode, clicking opens edit panel
+      setEditingArtwork(artwork);
+      return;
+    }
+
+    // Normal visitor mode
+    if (!viewedArtworks.has(artworkId)) {
+      await trackArtworkInteraction(artworkId, 'viewed');
+      setViewedArtworks(prev => new Set([...prev, artworkId]));
+    }
+
+    if (selectedArtwork === artworkId) {
+      setDetailArtwork(artwork);
+      await trackArtworkInteraction(artworkId, 'detail_viewed');
+    } else {
+      setSelectedArtwork(artworkId);
+    }
+  }, [selectedArtwork, localArtworks, trackArtworkInteraction, viewedArtworks, isAdminMode]);
+
+  // Keyboard handlers
+  const handleKeyDown = useCallback((event) => {
+    const key = event.key.toLowerCase();
+    
+    if (['w', 's', 'a', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(key)) {
+      event.preventDefault();
+      keysPressed.current.add(key);
+    }
+    
+    if (key === 'escape') {
+      setSelectedArtwork(null);
+      setDetailArtwork(null);
+      setEditingArtwork(null);
+      if (document.exitPointerLock) {
+        document.exitPointerLock();
+      }
+    }
+  }, []);
+
+  const handleKeyUp = useCallback((event) => {
+    const key = event.key.toLowerCase();
+    keysPressed.current.delete(key);
+  }, []);
+
+  useEffect(() => {
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [handleKeyDown, handleKeyUp]);
+
+  // Pointer lock setup (same as before)
   useEffect(() => {
     if (isMobile) return;
 
@@ -221,7 +479,7 @@ export default function VirtualStudio() {
     if (!canvas) return;
 
     const handleClick = (event) => {
-      if (event.target === canvas && !isPointerLocked.current) {
+      if (event.target === canvas && !isPointerLocked.current && !isAdminMode) {
         canvas.requestPointerLock();
       }
     };
@@ -274,61 +532,7 @@ export default function VirtualStudio() {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [isMobile]);
-
-  // Handle artwork selection with analytics
-  const handleArtworkClick = useCallback(async (artworkId) => {
-    const artwork = artworks.find(art => art.id === artworkId);
-    if (!artwork) return;
-
-    // Track artwork view if not already viewed
-    if (!viewedArtworks.has(artworkId)) {
-      await trackArtworkInteraction(artworkId, 'viewed');
-      setViewedArtworks(prev => new Set([...prev, artworkId]));
-    }
-
-    if (selectedArtwork === artworkId) {
-      // Second click - open detail view
-      setDetailArtwork(artwork);
-      await trackArtworkInteraction(artworkId, 'detail_viewed');
-    } else {
-      // First click - select artwork
-      setSelectedArtwork(artworkId);
-    }
-  }, [selectedArtwork, artworks, trackArtworkInteraction, viewedArtworks]);
-
-  // Keyboard event handlers
-  const handleKeyDown = useCallback((event) => {
-    const key = event.key.toLowerCase();
-    
-    if (['w', 's', 'a', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(key)) {
-      event.preventDefault();
-      keysPressed.current.add(key);
-    }
-    
-    if (key === 'escape') {
-      setSelectedArtwork(null);
-      setDetailArtwork(null);
-      if (document.exitPointerLock) {
-        document.exitPointerLock();
-      }
-    }
-  }, []);
-
-  const handleKeyUp = useCallback((event) => {
-    const key = event.key.toLowerCase();
-    keysPressed.current.delete(key);
-  }, []);
-
-  useEffect(() => {
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-    
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-    };
-  }, [handleKeyDown, handleKeyUp]);
+  }, [isMobile, isAdminMode]);
 
   // Mobile controls
   const handleMobileMove = useCallback((newPosition, movement) => {
@@ -371,17 +575,15 @@ export default function VirtualStudio() {
     }
   }, []);
 
-  // Show loading screen
-  if (loading) {
+  // Loading states
+  if (loading || authLoading) {
     return <LoadingScreen />;
   }
 
-  // Show error screen
   if (error || !artist) {
     return <ErrorScreen error={error} subdomain={subdomain} />;
   }
 
-  // Show gallery not found for main domain
   if (!subdomain) {
     return (
       <div style={{
@@ -404,6 +606,18 @@ export default function VirtualStudio() {
 
   return (
     <>
+      {/* Admin Toolbar */}
+      {(isArtist || !isAdminMode) && (
+        <AdminToolbar
+          isAdminMode={isAdminMode}
+          onToggleAdmin={handleToggleAdmin}
+          onAddArtwork={handleAddArtwork}
+          selectedArtwork={selectedArtwork}
+          onSaveChanges={handleSaveChanges}
+          hasUnsavedChanges={hasUnsavedChanges}
+        />
+      )}
+
       {/* 3D Canvas */}
       <Canvas 
         camera={{ position: [0, 1.6, 5], fov: 75 }}
@@ -414,7 +628,6 @@ export default function VirtualStudio() {
           gl.domElement.setAttribute('tabindex', '0');
         }}
       >
-        {/* Movement Handler */}
         <MovementHandler
           keysPressed={keysPressed}
           characterPosition={characterPosition}
@@ -424,11 +637,9 @@ export default function VirtualStudio() {
           setWalkingSpeed={setWalkingSpeed}
         />
         
-        {/* Gallery Environment */}
         <GalleryLighting />
         <Studio />
         
-        {/* Visitor Character */}
         <Character 
           position={characterPosition}
           rotation={characterRotation}
@@ -437,8 +648,8 @@ export default function VirtualStudio() {
           walkingSpeed={walkingSpeed}
         />
         
-        {/* Artwork Displays - Now using real data from Supabase */}
-        {artworks.map((artwork) => (
+        {/* Render artworks with admin visual cues */}
+        {localArtworks.map((artwork) => (
           <Portrait
             key={artwork.id}
             position={artwork.position}
@@ -448,15 +659,17 @@ export default function VirtualStudio() {
             imageUrl={artwork.imageUrl}
             isSelected={selectedArtwork === artwork.id}
             onClick={handleArtworkClick}
+            isAdminMode={isAdminMode}
+            isVisible={artwork.isVisible}
           />
         ))}
       </Canvas>
 
       {/* UI Overlays */}
-      <Instructions />
+      {!isAdminMode && <Instructions />}
       
       {/* Mobile Controls */}
-      {isMobile && (
+      {isMobile && !isAdminMode && (
         <MobileControls 
           onMove={handleMobileMove}
           onRotate={handleMobileRotate}
@@ -466,15 +679,34 @@ export default function VirtualStudio() {
       )}
 
       {/* Artwork Detail Modal */}
-      <ArtworkDetail 
-        artwork={detailArtwork}
-        onClose={() => setDetailArtwork(null)}
-      />
+      {!isAdminMode && (
+        <ArtworkDetail 
+          artwork={detailArtwork}
+          onClose={() => setDetailArtwork(null)}
+        />
+      )}
+
+      {/* Admin Edit Panel */}
+      {isAdminMode && editingArtwork && (
+  <ArtworkEditPanel
+    artwork={{...editingArtwork, artistId: artist.id}} // ✅ Add artist ID here
+    onClose={() => setEditingArtwork(null)}
+    onUpdate={handleUpdateArtwork}
+    onDelete={handleDeleteArtwork}
+    position={editingArtwork.position}
+    rotation={editingArtwork.rotation}
+  />
+)}
 
       {/* Info Panel */}
       <div className="version-label">
-        {artist?.display_name}'s Gallery - {artworks.length} Artworks
-        {!isPointerLocked.current && !isMobile && (
+        {artist?.display_name}'s Gallery - {localArtworks.length} Artworks
+        {isAdminMode && (
+          <div style={{ fontSize: '0.75rem', marginTop: '0.25rem', color: '#10b981' }}>
+            Admin Mode Active
+          </div>
+        )}
+        {!isPointerLocked.current && !isMobile && !isAdminMode && (
           <div style={{ fontSize: '0.75rem', marginTop: '0.25rem' }}>
             Click canvas to enable mouse look
           </div>
@@ -484,7 +716,7 @@ export default function VirtualStudio() {
             ESC to exit mouse look
           </div>
         )}
-        {selectedArtwork && (
+        {selectedArtwork && !isAdminMode && (
           <div style={{ fontSize: '0.75rem', marginTop: '0.25rem' }}>
             Click artwork again for details
           </div>
