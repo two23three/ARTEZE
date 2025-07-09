@@ -1,11 +1,27 @@
-// src/components/Gallery/Portrait.jsx
-import React, { useRef } from 'react';
-import { useFrame } from '@react-three/fiber';
+// src/components/Gallery/Portrait.jsx - Updated with real image support
+import React, { useRef, useState } from 'react';
+import { useFrame, useLoader } from '@react-three/fiber';
+import { TextureLoader } from 'three';
 import { Text } from '@react-three/drei';
 
-export default function Portrait({ position, rotation, title, onClick, isSelected, id }) {
+export default function Portrait({ position, rotation, title, onClick, isSelected, id, imageUrl }) {
   const frameRef = useRef();
   const artworkRef = useRef();
+  const [imageError, setImageError] = useState(false);
+  
+  // Try to load the real image, fallback to placeholder
+  let texture = null;
+  try {
+    if (imageUrl && !imageError) {
+      texture = useLoader(TextureLoader, imageUrl, undefined, () => {
+        setImageError(true);
+        console.log('Failed to load image:', imageUrl);
+      });
+    }
+  } catch (error) {
+    console.log('Texture loading error:', error);
+    setImageError(true);
+  }
   
   useFrame((state) => {
     if (artworkRef.current && isSelected) {
@@ -39,11 +55,19 @@ export default function Portrait({ position, rotation, title, onClick, isSelecte
         }}
       >
         <planeGeometry args={[2, 2.5]} />
-        <meshLambertMaterial 
-          color={isSelected ? "#ff6b6b" : "#f0f0f0"} 
-          transparent 
-          opacity={isSelected ? 0.9 : 1}
-        />
+        {texture ? (
+          <meshLambertMaterial 
+            map={texture}
+            transparent 
+            opacity={isSelected ? 0.9 : 1}
+          />
+        ) : (
+          <meshLambertMaterial 
+            color={imageError ? "#ff4444" : (isSelected ? "#ff6b6b" : "#f0f0f0")} 
+            transparent 
+            opacity={isSelected ? 0.9 : 1}
+          />
+        )}
       </mesh>
       
       {/* Artwork Title */}
@@ -57,6 +81,20 @@ export default function Portrait({ position, rotation, title, onClick, isSelecte
       >
         {title}
       </Text>
+      
+      {/* Error indicator */}
+      {imageError && (
+        <Text
+          position={[0, -1.8, 0.1]}
+          fontSize={0.1}
+          color="#ff4444"
+          anchorX="center"
+          anchorY="middle"
+          maxWidth={2}
+        >
+          (Image not found)
+        </Text>
+      )}
       
       {/* Selection indicator */}
       {isSelected && (

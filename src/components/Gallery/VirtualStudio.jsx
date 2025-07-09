@@ -1,4 +1,4 @@
-// src/components/Gallery/VirtualStudio.jsx - Fixed Mouse Look & Mobile Controls
+// src/components/Gallery/VirtualStudio.jsx - Updated with Supabase Integration
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 
@@ -13,8 +13,75 @@ import Instructions from '../UI/Instructions';
 import MobileControls from '../UI/MobileControls';
 import ArtworkDetail from '../UI/ArtworkDetail';
 
-// Import data
-import { mockArtworks } from '../../data/mockArtworks';
+// Import hooks and utilities
+import { useArtistGallery } from '../../hooks/useArtistGallery';
+import { useAnalytics } from '../../hooks/useAnalytics';
+
+// Helper function to extract subdomain
+function getSubdomain() {
+  const hostname = window.location.hostname;
+  const parts = hostname.split('.');
+  
+  // For development (localhost), default to 'samok'
+  if (hostname === 'localhost' || hostname === '127.0.0.1') {
+    return 'samok'; // Default to samo.k's gallery for testing
+  }
+  
+  // For production (subdomain.arteze.com)
+  if (parts.length >= 3) {
+    return parts[0]; // Return subdomain
+  }
+  
+  // For main domain (arteze.com)
+  return null;
+}
+
+// Loading component
+function LoadingScreen() {
+  return (
+    <div style={{
+      position: 'fixed',
+      top: '50%',
+      left: '50%',
+      transform: 'translate(-50%, -50%)',
+      color: 'white',
+      fontSize: '1.2rem',
+      textAlign: 'center',
+      zIndex: 100
+    }}>
+      <div>Loading Gallery...</div>
+      <div style={{ fontSize: '0.9rem', marginTop: '0.5rem', opacity: 0.7 }}>
+        Preparing your virtual art experience
+      </div>
+    </div>
+  );
+}
+
+// Error component
+function ErrorScreen({ error, subdomain }) {
+  return (
+    <div style={{
+      position: 'fixed',
+      top: '50%',
+      left: '50%',
+      transform: 'translate(-50%, -50%)',
+      color: 'white',
+      fontSize: '1.2rem',
+      textAlign: 'center',
+      zIndex: 100,
+      maxWidth: '400px',
+      padding: '2rem'
+    }}>
+      <div>Gallery Not Found</div>
+      <div style={{ fontSize: '0.9rem', marginTop: '0.5rem', opacity: 0.7 }}>
+        {subdomain ? `No gallery found for "${subdomain}"` : 'Invalid gallery URL'}
+      </div>
+      <div style={{ fontSize: '0.8rem', marginTop: '1rem', opacity: 0.5 }}>
+        {error}
+      </div>
+    </div>
+  );
+}
 
 // Movement handler component
 function MovementHandler({ 
@@ -31,7 +98,7 @@ function MovementHandler({
     const currentTime = state.clock.elapsedTime;
     const deltaTime = currentTime - lastTime.current;
     
-    if (deltaTime < 0.016) return; // Limit to ~60fps
+    if (deltaTime < 0.016) return;
     lastTime.current = currentTime;
     
     const hasMovement = keysPressed.current.size > 0;
@@ -47,7 +114,6 @@ function MovementHandler({
     const speed = 0.15;
     const [x, y, z] = characterPosition;
 
-    // Calculate movement based on character rotation (first person)
     const forward = {
       x: -Math.sin(characterRotation),
       z: -Math.cos(characterRotation)
@@ -61,7 +127,6 @@ function MovementHandler({
     let newX = x;
     let newZ = z;
 
-    // Process movement keys relative to where character is looking
     if (keysPressed.current.has('w') || keysPressed.current.has('arrowup')) {
       newX += forward.x * speed;
       newZ += forward.z * speed;
@@ -79,11 +144,9 @@ function MovementHandler({
       newZ += right.z * speed;
     }
 
-    // Boundary constraints
     newX = Math.max(-8.5, Math.min(8.5, newX));
     newZ = Math.max(-8.5, Math.min(8.5, newZ));
 
-    // Update position if changed
     if (Math.abs(newX - x) > 0.001 || Math.abs(newZ - z) > 0.001) {
       setCharacterPosition([newX, y, newZ]);
     }
@@ -93,6 +156,16 @@ function MovementHandler({
 }
 
 export default function VirtualStudio() {
+  // Get subdomain from URL
+  const subdomain = getSubdomain();
+  
+  // Fetch gallery data from Supabase
+  const { artist, artworks, loading, error } = useArtistGallery(subdomain);
+  
+  // Analytics tracking
+  const { startGalleryVisit, trackArtworkInteraction, endGalleryVisit } = useAnalytics();
+  
+  // Component state
   const [characterPosition, setCharacterPosition] = useState([0, 0, 5]);
   const [characterRotation, setCharacterRotation] = useState(0);
   const [cameraRotation, setCameraRotation] = useState(0);
@@ -101,6 +174,7 @@ export default function VirtualStudio() {
   const [isMobile, setIsMobile] = useState(false);
   const [isWalking, setIsWalking] = useState(false);
   const [walkingSpeed, setWalkingSpeed] = useState(0);
+  const [viewedArtworks, setViewedArtworks] = useState(new Set());
   
   // Movement state tracking
   const keysPressed = useRef(new Set());
@@ -117,7 +191,29 @@ export default function VirtualStudio() {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  // Pointer lock setup for desktop - FIXED VERSION
+  // Start analytics tracking when gallery loads
+  useEffect(() => {
+    if (artist && !loading) {
+      startGalleryVisit(artist.id);
+      sessionStorage.setItem('visit-start-time', Date.now().toString());
+      
+      // Track page visibility to end visit when user leaves
+      const handleVisibilityChange = () => {
+        if (document.visibilityState === 'hidden') {
+          endGalleryVisit(viewedArtworks.size);
+        }
+      };
+      
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+      
+      return () => {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+        endGalleryVisit(viewedArtworks.size);
+      };
+    }
+  }, [artist, loading]);
+
+  // Pointer lock setup for desktop
   useEffect(() => {
     if (isMobile) return;
 
@@ -125,7 +221,6 @@ export default function VirtualStudio() {
     if (!canvas) return;
 
     const handleClick = (event) => {
-      // Only request pointer lock if clicking on canvas and not already locked
       if (event.target === canvas && !isPointerLocked.current) {
         canvas.requestPointerLock();
       }
@@ -134,7 +229,6 @@ export default function VirtualStudio() {
     const handlePointerLockChange = () => {
       isPointerLocked.current = document.pointerLockElement === canvas;
       
-      // Change cursor to indicate pointer lock status
       if (isPointerLocked.current) {
         document.body.style.cursor = 'none';
       } else {
@@ -148,11 +242,9 @@ export default function VirtualStudio() {
       const movementX = event.movementX || 0;
       const movementY = event.movementY || 0;
 
-      // Much lower sensitivity like mobile - was 0.002, now 0.001
       const horizontalSensitivity = 0.001;
-      const verticalSensitivity = 0.0008; // Even lower for vertical
+      const verticalSensitivity = 0.0008;
 
-      // Dead zones to prevent tiny jittery movements
       if (Math.abs(movementX) > 1) {
         setCharacterRotation(prev => prev - movementX * horizontalSensitivity);
       }
@@ -160,7 +252,6 @@ export default function VirtualStudio() {
       if (Math.abs(movementY) > 1) {
         setCameraRotation(prev => {
           const newRotation = prev - movementY * verticalSensitivity;
-          // Clamp between -90 and +90 degrees (looking down to looking up)
           return Math.max(-Math.PI/2, Math.min(Math.PI/2, newRotation));
         });
       }
@@ -172,7 +263,6 @@ export default function VirtualStudio() {
       }
     };
 
-    // Add event listeners to canvas specifically
     canvas.addEventListener('click', handleClick);
     document.addEventListener('pointerlockchange', handlePointerLockChange);
     document.addEventListener('mousemove', handleMouseMove);
@@ -186,17 +276,28 @@ export default function VirtualStudio() {
     };
   }, [isMobile]);
 
-  // Handle artwork selection
-  const handleArtworkClick = useCallback((artworkId) => {
+  // Handle artwork selection with analytics
+  const handleArtworkClick = useCallback(async (artworkId) => {
+    const artwork = artworks.find(art => art.id === artworkId);
+    if (!artwork) return;
+
+    // Track artwork view if not already viewed
+    if (!viewedArtworks.has(artworkId)) {
+      await trackArtworkInteraction(artworkId, 'viewed');
+      setViewedArtworks(prev => new Set([...prev, artworkId]));
+    }
+
     if (selectedArtwork === artworkId) {
-      const artwork = mockArtworks.find(art => art.id === artworkId);
+      // Second click - open detail view
       setDetailArtwork(artwork);
+      await trackArtworkInteraction(artworkId, 'detail_viewed');
     } else {
+      // First click - select artwork
       setSelectedArtwork(artworkId);
     }
-  }, [selectedArtwork]);
+  }, [selectedArtwork, artworks, trackArtworkInteraction, viewedArtworks]);
 
-  // Handle key down events
+  // Keyboard event handlers
   const handleKeyDown = useCallback((event) => {
     const key = event.key.toLowerCase();
     
@@ -214,13 +315,11 @@ export default function VirtualStudio() {
     }
   }, []);
 
-  // Handle key up events
   const handleKeyUp = useCallback((event) => {
     const key = event.key.toLowerCase();
     keysPressed.current.delete(key);
   }, []);
 
-  // Set up keyboard event listeners
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
@@ -231,62 +330,36 @@ export default function VirtualStudio() {
     };
   }, [handleKeyDown, handleKeyUp]);
 
-  // Handle mobile movement - Roblox Style (relative to camera direction)
+  // Mobile controls
   const handleMobileMove = useCallback((newPosition, movement) => {
-    console.log('Mobile move called:', { newPosition, movement }); // Debug log
-    
     if (movement) {
-      // Movement relative to camera direction
       const { forward, right } = movement;
       
-      // Get CURRENT position instead of stale closure
       setCharacterPosition(prevPosition => {
         const [x, y, z] = prevPosition;
         
-        console.log('Movement vector:', { forward, right, characterRotation }); // Debug log
-        
-        // Calculate movement direction based on character rotation
         const cosRotation = Math.cos(characterRotation);
         const sinRotation = Math.sin(characterRotation);
         
-        // Apply movement relative to where character is facing
         const deltaX = forward * -sinRotation + right * cosRotation;
         const deltaZ = forward * -cosRotation + right * -sinRotation;
         
         const newX = x + deltaX;
         const newZ = z + deltaZ;
         
-        console.log('Position update:', { 
-          from: `[${x.toFixed(2)}, ${z.toFixed(2)}]`, 
-          to: `[${newX.toFixed(2)}, ${newZ.toFixed(2)}]`, 
-          delta: `[${deltaX.toFixed(3)}, ${deltaZ.toFixed(3)}]` 
-        }); // Debug log
-        
-        // Apply boundaries
         const clampedX = Math.max(-8.5, Math.min(8.5, newX));
         const clampedZ = Math.max(-8.5, Math.min(8.5, newZ));
         
-        const newPos = [clampedX, y, clampedZ];
-        
-        // Only update if position actually changed
-        if (Math.abs(clampedX - x) > 0.001 || Math.abs(clampedZ - z) > 0.001) {
-          console.log('Character position updated to:', `[${clampedX.toFixed(2)}, ${y}, ${clampedZ.toFixed(2)}]`); // Debug log
-        }
-        
-        return newPos;
+        return [clampedX, y, clampedZ];
       });
       
-      // Set walking state for animation
       setIsWalking(Math.abs(forward) > 0.01 || Math.abs(right) > 0.01);
     } else if (newPosition) {
-      // Direct position update (fallback)
-      console.log('Direct position update:', newPosition); // Debug log
       setCharacterPosition(newPosition);
       setIsWalking(false);
     }
-  }, [characterRotation, setIsWalking]); // Remove characterPosition from dependencies
+  }, [characterRotation, setIsWalking]);
 
-  // Handle mobile rotation - Smooth camera control
   const handleMobileRotate = useCallback((axis, delta) => {
     if (axis === 'horizontal') {
       setCharacterRotation(prev => prev + delta);
@@ -298,6 +371,37 @@ export default function VirtualStudio() {
     }
   }, []);
 
+  // Show loading screen
+  if (loading) {
+    return <LoadingScreen />;
+  }
+
+  // Show error screen
+  if (error || !artist) {
+    return <ErrorScreen error={error} subdomain={subdomain} />;
+  }
+
+  // Show gallery not found for main domain
+  if (!subdomain) {
+    return (
+      <div style={{
+        position: 'fixed',
+        top: '50%',
+        left: '50%',
+        transform: 'translate(-50%, -50%)',
+        color: 'white',
+        fontSize: '1.2rem',
+        textAlign: 'center',
+        zIndex: 100
+      }}>
+        <div>Welcome to Arteze</div>
+        <div style={{ fontSize: '0.9rem', marginTop: '0.5rem', opacity: 0.7 }}>
+          Visit an artist's gallery at: artist.arteze.com
+        </div>
+      </div>
+    );
+  }
+
   return (
     <>
       {/* 3D Canvas */}
@@ -307,7 +411,6 @@ export default function VirtualStudio() {
         style={{ background: '#2c2c2c' }}
         onCreated={({ gl }) => {
           gl.domElement.oncontextmenu = (e) => e.preventDefault();
-          // Ensure canvas can receive focus for pointer lock
           gl.domElement.setAttribute('tabindex', '0');
         }}
       >
@@ -334,14 +437,15 @@ export default function VirtualStudio() {
           walkingSpeed={walkingSpeed}
         />
         
-        {/* Artwork Displays */}
-        {mockArtworks.map((artwork) => (
+        {/* Artwork Displays - Now using real data from Supabase */}
+        {artworks.map((artwork) => (
           <Portrait
             key={artwork.id}
             position={artwork.position}
             rotation={artwork.rotation}
             title={artwork.title}
             id={artwork.id}
+            imageUrl={artwork.imageUrl}
             isSelected={selectedArtwork === artwork.id}
             onClick={handleArtworkClick}
           />
@@ -369,7 +473,7 @@ export default function VirtualStudio() {
 
       {/* Info Panel */}
       <div className="version-label">
-        Virtual Studio - Phase 1
+        {artist?.display_name}'s Gallery - {artworks.length} Artworks
         {!isPointerLocked.current && !isMobile && (
           <div style={{ fontSize: '0.75rem', marginTop: '0.25rem' }}>
             Click canvas to enable mouse look
