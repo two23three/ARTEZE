@@ -68,6 +68,7 @@ export default function Character({
       // Apply camera rotation (look around)
       camera.rotation.y = rotation;
       camera.rotation.x = cameraRotation;
+      camera.rotation.z = 0; 
       
       // Foot stepping animation
       if (leftShoeRef.current && rightShoeRef.current) {
