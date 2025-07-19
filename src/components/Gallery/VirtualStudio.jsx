@@ -491,7 +491,7 @@ export default function VirtualStudio() {
 
     const handleClick = (event) => {
       // Only request pointer lock if clicking on canvas and not already locked
-      if (event.target === canvas && !isPointerLocked.current && !isAdminMode) {
+      if (event.target === canvas && !isPointerLocked.current){
         canvas.requestPointerLock();
       }
     };
@@ -643,6 +643,7 @@ export default function VirtualStudio() {
         onCreated={({ gl }) => {
           gl.domElement.oncontextmenu = (e) => e.preventDefault();
           gl.domElement.setAttribute('tabindex', '0');
+           gl.domElement.focus();
         }}
       >
         <MovementHandler
@@ -686,7 +687,7 @@ export default function VirtualStudio() {
       {!isAdminMode && <Instructions />}
       
       {/* Mobile Controls */}
-      {isMobile && !isAdminMode && (
+      {isMobile &&(
         <MobileControls 
           onMove={handleMobileMove}
           onRotate={handleMobileRotate}
