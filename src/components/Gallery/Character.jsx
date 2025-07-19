@@ -1,5 +1,5 @@
-// src/components/Gallery/Character.jsx - Debug Version
-import React, { useRef, useEffect } from 'react';
+// src/components/Gallery/Character.jsx - Debug logs removed
+import React, { useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 
@@ -17,18 +17,9 @@ export default function Character({
   
   // Store base camera position to avoid cumulative errors
   const baseCameraY = useRef(1.6);
-  const lastLogTime = useRef(0);
   
   useFrame((state, delta) => {
     if (meshRef.current) {
-      // Log position updates occasionally for debugging
-      const currentTime = state.clock.elapsedTime;
-      if (currentTime - lastLogTime.current > 1) { // Log every second
-        console.log('Character component - Target position:', position, 'Current mesh position:', 
-          `[${meshRef.current.position.x.toFixed(2)}, ${meshRef.current.position.z.toFixed(2)}]`);
-        lastLogTime.current = currentTime;
-      }
-      
       // Update character position more aggressively for mobile
       const targetPos = new THREE.Vector3(...position);
       const currentPos = meshRef.current.position;
@@ -68,7 +59,6 @@ export default function Character({
       // Apply camera rotation (look around)
       camera.rotation.y = rotation;
       camera.rotation.x = cameraRotation;
-      camera.rotation.z = 0; 
       
       // Foot stepping animation
       if (leftShoeRef.current && rightShoeRef.current) {
@@ -102,7 +92,7 @@ export default function Character({
         <meshBasicMaterial color="#ff0000" transparent opacity={0} />
       </mesh>
       
-      {/* Visible feet/shoes for reference - make them more visible for debugging */}
+      {/* Visible feet/shoes for reference */}
       <mesh ref={leftShoeRef} position={[-0.15, 0.05, 0.1]} castShadow>
         <boxGeometry args={[0.3, 0.1, 0.5]} />
         <meshLambertMaterial color={isWalking ? "#ff6b6b" : "#2c1810"} />

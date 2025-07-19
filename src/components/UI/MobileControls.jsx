@@ -1,4 +1,4 @@
-// src/components/UI/MobileControls.jsx - Roblox-Style Controls
+// src/components/UI/MobileControls.jsx - Roblox-Style Controls (Debug logs removed)
 import React, { useRef, useState, useCallback } from 'react';
 
 export default function MobileControls({ onMove, onRotate, characterPosition, isMobile }) {
@@ -60,8 +60,6 @@ export default function MobileControls({ onMove, onRotate, characterPosition, is
   const startMovement = useCallback(() => {
     if (moveInterval.current) return;
     
-    console.log('Starting joystick movement interval'); // Debug log
-    
     moveInterval.current = setInterval(() => {
       const currentPos = joystickPosRef.current; // Use ref to avoid closure
       const magnitude = getDistance(0, 0, currentPos.x, currentPos.y);
@@ -74,8 +72,6 @@ export default function MobileControls({ onMove, onRotate, characterPosition, is
       // Calculate movement direction relative to joystick
       const moveRight = (currentPos.x / MAX_DISTANCE) * speed;
       const moveForward = -(currentPos.y / MAX_DISTANCE) * speed; // Invert Y
-      
-      console.log('Joystick sending movement:', { moveForward, moveRight, magnitude, speed, normalizedMagnitude }); // Enhanced debug log
       
       // Send movement vector to parent - let parent handle position calculation
       onMove(null, { forward: moveForward, right: moveRight });
