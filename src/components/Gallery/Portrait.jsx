@@ -1,4 +1,4 @@
-// src/components/Gallery/Portrait.jsx - Updated with simple retry logic
+// src/components/Gallery/Portrait.jsx - Fixed version
 import React, { useRef, useState } from 'react';
 import { useFrame, useLoader } from '@react-three/fiber';
 import { TextureLoader } from 'three';
@@ -18,50 +18,29 @@ export default function Portrait({
   const frameRef = useRef();
   const artworkRef = useRef();
   const [imageError, setImageError] = useState(false);
-  const [retryCount, setRetryCount] = useState(0);
   const [isHovered, setIsHovered] = useState(false);
   
-  // Add cache busting and retry logic
-  const getImageUrl = () => {
-    if (!imageUrl || imageError) return null;
-    // Add timestamp to bypass cache on retry
-    return retryCount > 0 ? `${imageUrl}?retry=${retryCount}&t=${Date.now()}` : imageUrl;
-  };
-
-  const currentImageUrl = getImageUrl();
+  // Debug log the imageUrl
+  //console.log(`Portrait ${title}: imageUrl = ${imageUrl}`);
   
-  // Try to load the image with retry logic
+  // Try to load the image with better error handling
   let texture = null;
   try {
-    if (currentImageUrl && !imageError) {
-      texture = useLoader(TextureLoader, currentImageUrl, undefined, (error) => {
-        console.log(`Image load failed for "${title}":`, error);
-        setImageError(true);
-      });
+    if (imageUrl && !imageError) {
+      texture = useLoader(
+        TextureLoader, 
+        imageUrl,
+        undefined,
+        (error) => {
+          console.log(`Failed to load image for ${title}:`, error);
+          setImageError(true);
+        }
+      );
     }
   } catch (error) {
-    console.log(`Texture loading error for "${title}":`, error);
+    console.log(`Texture loading error for ${title}:`, error);
     setImageError(true);
   }
-  
-  // Retry function
-  const retryImage = () => {
-    if (retryCount < 3) { // Max 3 retries
-      console.log(`Retrying image load for "${title}" (attempt ${retryCount + 1})`);
-      setImageError(false);
-      setRetryCount(prev => prev + 1);
-    }
-  };
-
-  // Auto-retry after delay on first failure
-  React.useEffect(() => {
-    if (imageError && retryCount === 0) {
-      const timer = setTimeout(() => {
-        retryImage();
-      }, 2000); // Wait 2 seconds before first retry
-      return () => clearTimeout(timer);
-    }
-  }, [imageError, retryCount]);
   
   useFrame((state) => {
     if (artworkRef.current) {
@@ -87,9 +66,9 @@ export default function Portrait({
 
   const getArtworkColor = () => {
     if (!texture) {
-      if (imageError && retryCount >= 3) return "#ff4444"; // Red after all retries failed
-      if (imageError) return "#ffa500"; // Orange while retrying
+      if (imageError) return "#ff4444";
       if (isSelected) return "#ff6b6b";
+      if (isAdminMode && !isVisible) return "#991b1b";
       return "#f0f0f0";
     }
     return null;
@@ -119,12 +98,7 @@ export default function Portrait({
         position={[0, 0, 0.06]} 
         onClick={(event) => {
           event.stopPropagation();
-          // If image failed and we haven't exceeded retries, retry on click
-          if (imageError && retryCount < 3) {
-            retryImage();
-          } else {
-            onClick(id);
-          }
+          onClick(id);
         }}
         onPointerOver={(event) => {
           event.stopPropagation();
@@ -164,36 +138,31 @@ export default function Portrait({
         {title}
       </Text>
       
-      {/* Status Text */}
-      <Text
-        position={[0, -1.8, 0.1]}
-        fontSize={0.1}
-        color={
-          imageError ? (retryCount >= 3 ? "#ff4444" : "#ffa500") :
-          isAdminMode ? (isVisible ? "#10b981" : "#ff4444") : "#666"
-        }
-        anchorX="center"
-        anchorY="middle"
-      >
-        {imageError ? 
-          (retryCount >= 3 ? "Click to retry" : `Retrying... (${retryCount}/3)`) :
-          isAdminMode ? (isVisible ? "👁️ Visible" : "🚫 Hidden") : ""
-        }
-      </Text>
+      {/* Debug info - remove this after testing */}
+      {/* {imageError && (
+        <Text
+          position={[0, -1.8, 0.1]}
+          fontSize={0.1}
+          color="#ff4444"
+          anchorX="center"
+          anchorY="middle"
+          maxWidth={2}
+        >
+          Image failed to load
+        </Text>
+      )} */}
       
-      {/* Selection indicators - same as before */}
-      {isSelected && !isAdminMode && (
-        <mesh position={[0, 0, 0.08]}>
-          <ringGeometry args={[1.1, 1.15, 32]} />
-          <meshBasicMaterial color="#ff6b6b" transparent opacity={0.7} />
-        </mesh>
-      )}
-      
-      {isSelected && isAdminMode && (
-        <mesh position={[0, 0, 0.08]}>
-          <ringGeometry args={[1.1, 1.15, 32]} />
-          <meshBasicMaterial color="#10b981" transparent opacity={0.8} />
-        </mesh>
+      {!imageUrl && (
+        <Text
+          position={[0, -2.1, 0.1]}
+          fontSize={0.08}
+          color="#ffaa00"
+          anchorX="center"
+          anchorY="middle"
+          maxWidth={2}
+        >
+          No image URL
+        </Text>
       )}
     </group>
   );
