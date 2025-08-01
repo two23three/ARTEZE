@@ -491,7 +491,7 @@ export default function VirtualStudio() {
 
     const handleClick = (event) => {
       // Only request pointer lock if clicking on canvas and not already locked
-      if (event.target === canvas && !isPointerLocked.current){
+      if (event.target === canvas && !isPointerLocked.current && !isAdminMode) {
         canvas.requestPointerLock();
       }
     };
@@ -551,34 +551,60 @@ export default function VirtualStudio() {
     };
   }, [isMobile, isAdminMode]);
 
+  // Handle mobile movement - Roblox Style (relative to camera direction)
   const handleMobileMove = useCallback((newPosition, movement) => {
+    console.log('Mobile move called:', { newPosition, movement }); // Debug log
+    
     if (movement) {
+      // Movement relative to camera direction
       const { forward, right } = movement;
       
+      // Get CURRENT position instead of stale closure
       setCharacterPosition(prevPosition => {
         const [x, y, z] = prevPosition;
         
+        console.log('Movement vector:', { forward, right, characterRotation }); // Debug log
+        
+        // Calculate movement direction based on character rotation
         const cosRotation = Math.cos(characterRotation);
         const sinRotation = Math.sin(characterRotation);
         
+        // Apply movement relative to where character is facing
         const deltaX = forward * -sinRotation + right * cosRotation;
         const deltaZ = forward * -cosRotation + right * -sinRotation;
         
         const newX = x + deltaX;
         const newZ = z + deltaZ;
         
+        console.log('Position update:', { 
+          from: `[${x.toFixed(2)}, ${z.toFixed(2)}]`, 
+          to: `[${newX.toFixed(2)}, ${newZ.toFixed(2)}]`, 
+          delta: `[${deltaX.toFixed(3)}, ${deltaZ.toFixed(3)}]` 
+        }); // Debug log
+        
+        // Apply boundaries
         const clampedX = Math.max(-8.5, Math.min(8.5, newX));
         const clampedZ = Math.max(-8.5, Math.min(8.5, newZ));
         
-        return [clampedX, y, clampedZ];
+        const newPos = [clampedX, y, clampedZ];
+        
+        // Only update if position actually changed
+        if (Math.abs(clampedX - x) > 0.001 || Math.abs(clampedZ - z) > 0.001) {
+          console.log('Character position updated to:', `[${clampedX.toFixed(2)}, ${y}, ${clampedZ.toFixed(2)}]`); // Debug log
+        }
+        
+        return newPos;
       });
       
+      // Set walking state for animation
       setIsWalking(Math.abs(forward) > 0.01 || Math.abs(right) > 0.01);
     } else if (newPosition) {
+      // Direct position update (fallback)
+      console.log('Direct position update:', newPosition); // Debug log
       setCharacterPosition(newPosition);
       setIsWalking(false);
     }
-  }, [characterRotation, setIsWalking]);
+  }, [characterRotation, setIsWalking]); // Remove characterPosition from dependencies
 
   // Handle mobile rotation - Smooth camera control
   const handleMobileRotate = useCallback((axis, delta) => {
@@ -643,7 +669,6 @@ export default function VirtualStudio() {
         onCreated={({ gl }) => {
           gl.domElement.oncontextmenu = (e) => e.preventDefault();
           gl.domElement.setAttribute('tabindex', '0');
-           gl.domElement.focus();
         }}
       >
         <MovementHandler
@@ -687,7 +712,7 @@ export default function VirtualStudio() {
       {!isAdminMode && <Instructions />}
       
       {/* Mobile Controls */}
-      {isMobile &&(
+      {isMobile && !isAdminMode && (
         <MobileControls 
           onMove={handleMobileMove}
           onRotate={handleMobileRotate}
