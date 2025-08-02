@@ -1,7 +1,6 @@
-// src/components/Gallery/Portrait.jsx - Fixed version
+// src/components/Gallery/Portrait.jsx - Simplified version using preloaded textures
 import React, { useRef, useState } from 'react';
-import { useFrame, useLoader } from '@react-three/fiber';
-import { TextureLoader } from 'three';
+import { useFrame } from '@react-three/fiber';
 import { Text } from '@react-three/drei';
 
 export default function Portrait({ 
@@ -11,36 +10,13 @@ export default function Portrait({
   onClick, 
   isSelected, 
   id, 
-  imageUrl,
+  texture, // Preloaded texture passed as prop
   isAdminMode = false,
   isVisible = true
 }) {
   const frameRef = useRef();
   const artworkRef = useRef();
-  const [imageError, setImageError] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
-  
-  // Debug log the imageUrl
-  //console.log(`Portrait ${title}: imageUrl = ${imageUrl}`);
-  
-  // Try to load the image with better error handling
-  let texture = null;
-  try {
-    if (imageUrl && !imageError) {
-      texture = useLoader(
-        TextureLoader, 
-        imageUrl,
-        undefined,
-        (error) => {
-          console.log(`Failed to load image for ${title}:`, error);
-          setImageError(true);
-        }
-      );
-    }
-  } catch (error) {
-    console.log(`Texture loading error for ${title}:`, error);
-    setImageError(true);
-  }
   
   useFrame((state) => {
     if (artworkRef.current) {
@@ -66,7 +42,6 @@ export default function Portrait({
 
   const getArtworkColor = () => {
     if (!texture) {
-      if (imageError) return "#ff4444";
       if (isSelected) return "#ff6b6b";
       if (isAdminMode && !isVisible) return "#991b1b";
       return "#f0f0f0";
@@ -138,30 +113,17 @@ export default function Portrait({
         {title}
       </Text>
       
-      {/* Debug info - remove this after testing */}
-      {/* {imageError && (
+      {/* Show loading state if no texture */}
+      {!texture && (
         <Text
           position={[0, -1.8, 0.1]}
           fontSize={0.1}
-          color="#ff4444"
-          anchorX="center"
-          anchorY="middle"
-          maxWidth={2}
-        >
-          Image failed to load
-        </Text>
-      )} */}
-      
-      {!imageUrl && (
-        <Text
-          position={[0, -2.1, 0.1]}
-          fontSize={0.08}
           color="#ffaa00"
           anchorX="center"
           anchorY="middle"
           maxWidth={2}
         >
-          No image URL
+          Loading...
         </Text>
       )}
     </group>

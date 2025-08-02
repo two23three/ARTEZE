@@ -1,4 +1,4 @@
-// src/components/Gallery/VirtualStudio.jsx - With Fixed Mouse Controls & Admin Mode
+// src/components/Gallery/VirtualStudio.jsx - Updated with Image Preloader
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 
@@ -17,9 +17,9 @@ import { AdminToolbar, ArtworkEditPanel } from '../Admin/GalleryAdminMode';
 // Import hooks and utilities
 import { useArtistGallery } from '../../hooks/useArtistGallery';
 import { useAnalytics } from '../../hooks/useAnalytics';
+import { useImagePreloader, GalleryLoadingScreen } from '../../hooks/useImagePreloader';
 import { supabase } from '../../lib/supabase';
 
-// Helper function to extract subdomain
 // Helper function to extract subdomain
 function getSubdomain() {
   const hostname = window.location.hostname;
@@ -29,12 +29,10 @@ function getSubdomain() {
     return 'samok';
   }
   
-  // Handle main domain (arteze.vercel.app -> show samok as demo)
   if (hostname === 'arteze.vercel.app') {
     return 'samok';
   }
   
-  // Handle real subdomains (artist.arteze.com)
   if (parts.length >= 3 && !hostname.includes('vercel.app')) {
     return parts[0];
   }
@@ -42,21 +40,18 @@ function getSubdomain() {
   return null;
 }
 
-// Check if user is the artist (simple auth check)
+// Check if user is the artist
 function useArtistAuth(artistId) {
   const [isArtist, setIsArtist] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // For now, simple localStorage check
-    // In production, this would be proper authentication
     const isAuthenticated = localStorage.getItem('artist-auth') === artistId;
     setIsArtist(isAuthenticated);
     setLoading(false);
   }, [artistId]);
 
   const login = () => {
-    // Simple demo login - in production use proper auth
     const password = prompt('Enter artist password:');
     if (password === 'artist123') {
       localStorage.setItem('artist-auth', artistId);
@@ -64,36 +59,27 @@ function useArtistAuth(artistId) {
     }
   };
 
-  const logout = () => {
-    localStorage.removeItem('artist-auth');
-    setIsArtist(false);
-  };
-
-  return { isArtist, loading, login, logout };
+  return { isArtist, loading, login };
 }
 
 // Generate default positions for new artworks
 function generateDefaultPosition(existingArtworks) {
   const wallPositions = [
-    // Back wall
     { x: -6, y: 2.5, z: -9.8, rotation: [0, 0, 0] },
     { x: -3, y: 2.5, z: -9.8, rotation: [0, 0, 0] },
     { x: 0, y: 2.5, z: -9.8, rotation: [0, 0, 0] },
     { x: 3, y: 2.5, z: -9.8, rotation: [0, 0, 0] },
     { x: 6, y: 2.5, z: -9.8, rotation: [0, 0, 0] },
-    // Left wall
     { x: -9.8, y: 2.5, z: -6, rotation: [0, Math.PI / 2, 0] },
     { x: -9.8, y: 2.5, z: -3, rotation: [0, Math.PI / 2, 0] },
     { x: -9.8, y: 2.5, z: 0, rotation: [0, Math.PI / 2, 0] },
     { x: -9.8, y: 2.5, z: 3, rotation: [0, Math.PI / 2, 0] },
-    // Right wall
     { x: 9.8, y: 2.5, z: -6, rotation: [0, -Math.PI / 2, 0] },
     { x: 9.8, y: 2.5, z: -3, rotation: [0, -Math.PI / 2, 0] },
     { x: 9.8, y: 2.5, z: 0, rotation: [0, -Math.PI / 2, 0] },
     { x: 9.8, y: 2.5, z: 3, rotation: [0, -Math.PI / 2, 0] }
   ];
 
-  // Find first available position
   for (const pos of wallPositions) {
     const occupied = existingArtworks.some(artwork => 
       Math.abs(artwork.position[0] - pos.x) < 1 && 
@@ -104,11 +90,10 @@ function generateDefaultPosition(existingArtworks) {
     }
   }
 
-  // If no space, place in center
   return { position: [0, 2.5, -5], rotation: [0, 0, 0] };
 }
 
-// Loading and Error components
+// Loading Screen
 function LoadingScreen() {
   return (
     <div style={{
@@ -129,6 +114,7 @@ function LoadingScreen() {
   );
 }
 
+// Error Screen
 function ErrorScreen({ error, subdomain }) {
   return (
     <div style={{
@@ -154,7 +140,7 @@ function ErrorScreen({ error, subdomain }) {
   );
 }
 
-// Movement handler component - FIXED VERSION
+// Movement handler component
 function MovementHandler({ 
   keysPressed, 
   characterPosition, 
@@ -169,7 +155,7 @@ function MovementHandler({
     const currentTime = state.clock.elapsedTime;
     const deltaTime = currentTime - lastTime.current;
     
-    if (deltaTime < 0.016) return; // Limit to ~60fps
+    if (deltaTime < 0.016) return;
     lastTime.current = currentTime;
     
     const hasMovement = keysPressed.current.size > 0;
@@ -185,7 +171,6 @@ function MovementHandler({
     const speed = 0.15;
     const [x, y, z] = characterPosition;
 
-    // Calculate movement based on character rotation (first person)
     const forward = {
       x: -Math.sin(characterRotation),
       z: -Math.cos(characterRotation)
@@ -199,7 +184,6 @@ function MovementHandler({
     let newX = x;
     let newZ = z;
 
-    // Process movement keys relative to where character is looking
     if (keysPressed.current.has('w') || keysPressed.current.has('arrowup')) {
       newX += forward.x * speed;
       newZ += forward.z * speed;
@@ -217,11 +201,9 @@ function MovementHandler({
       newZ += right.z * speed;
     }
 
-    // Boundary constraints
     newX = Math.max(-8.5, Math.min(8.5, newX));
     newZ = Math.max(-8.5, Math.min(8.5, newZ));
 
-    // Update position if changed
     if (Math.abs(newX - x) > 0.001 || Math.abs(newZ - z) > 0.001) {
       setCharacterPosition([newX, y, newZ]);
     }
@@ -235,6 +217,9 @@ export default function VirtualStudio() {
   const { artist, artworks, loading, error, refetch } = useArtistGallery(subdomain);
   const { isArtist, loading: authLoading, login } = useArtistAuth(artist?.id);
   const { startGalleryVisit, trackArtworkInteraction, endGalleryVisit } = useAnalytics();
+  
+  // Image preloader - THIS IS THE KEY ADDITION
+  const { loadingState, getTextureForArtwork, reloadImages } = useImagePreloader(artworks);
   
   // Gallery state
   const [localArtworks, setLocalArtworks] = useState([]);
@@ -336,7 +321,6 @@ export default function VirtualStudio() {
 
       if (error) throw error;
 
-      // Add to local state
       const newArtwork = {
         id: data.id,
         title: data.title,
@@ -368,12 +352,10 @@ export default function VirtualStudio() {
 
   const handleUpdateArtwork = async (artworkId, updates) => {
     try {
-      // Update local state immediately
       setLocalArtworks(prev => prev.map(artwork => 
         artwork.id === artworkId ? { ...artwork, ...updates } : artwork
       ));
 
-      // Update in database
       const { error } = await supabase
         .from('artworks')
         .update({
@@ -418,7 +400,6 @@ export default function VirtualStudio() {
   };
 
   const handleSaveChanges = async () => {
-    // Save any pending changes
     await refetch();
     setHasUnsavedChanges(false);
   };
@@ -429,12 +410,10 @@ export default function VirtualStudio() {
     if (!artwork) return;
 
     if (isAdminMode) {
-      // In admin mode, clicking opens edit panel
       setEditingArtwork(artwork);
       return;
     }
 
-    // Normal visitor mode
     if (!viewedArtworks.has(artworkId)) {
       await trackArtworkInteraction(artworkId, 'viewed');
       setViewedArtworks(prev => new Set([...prev, artworkId]));
@@ -482,7 +461,7 @@ export default function VirtualStudio() {
     };
   }, [handleKeyDown, handleKeyUp]);
 
-  // Pointer lock setup for desktop - FIXED VERSION from earlier
+  // Pointer lock setup for desktop
   useEffect(() => {
     if (isMobile) return;
 
@@ -490,7 +469,6 @@ export default function VirtualStudio() {
     if (!canvas) return;
 
     const handleClick = (event) => {
-      // Only request pointer lock if clicking on canvas and not already locked
       if (event.target === canvas && !isPointerLocked.current && !isAdminMode) {
         canvas.requestPointerLock();
       }
@@ -499,7 +477,6 @@ export default function VirtualStudio() {
     const handlePointerLockChange = () => {
       isPointerLocked.current = document.pointerLockElement === canvas;
       
-      // Change cursor to indicate pointer lock status
       if (isPointerLocked.current) {
         document.body.style.cursor = 'none';
       } else {
@@ -513,11 +490,9 @@ export default function VirtualStudio() {
       const movementX = event.movementX || 0;
       const movementY = event.movementY || 0;
 
-      // Much lower sensitivity like mobile - was 0.002, now 0.001
       const horizontalSensitivity = 0.001;
-      const verticalSensitivity = 0.0008; // Even lower for vertical
+      const verticalSensitivity = 0.0008;
 
-      // Dead zones to prevent tiny jittery movements
       if (Math.abs(movementX) > 1) {
         setCharacterRotation(prev => prev - movementX * horizontalSensitivity);
       }
@@ -525,7 +500,6 @@ export default function VirtualStudio() {
       if (Math.abs(movementY) > 1) {
         setCameraRotation(prev => {
           const newRotation = prev - movementY * verticalSensitivity;
-          // Clamp between -90 and +90 degrees (looking down to looking up)
           return Math.max(-Math.PI/2, Math.min(Math.PI/2, newRotation));
         });
       }
@@ -537,7 +511,6 @@ export default function VirtualStudio() {
       }
     };
 
-    // Add event listeners to canvas specifically
     canvas.addEventListener('click', handleClick);
     document.addEventListener('pointerlockchange', handlePointerLockChange);
     document.addEventListener('mousemove', handleMouseMove);
@@ -551,62 +524,39 @@ export default function VirtualStudio() {
     };
   }, [isMobile, isAdminMode]);
 
-  // Handle mobile movement - Roblox Style (relative to camera direction)
+  // Handle mobile movement
   const handleMobileMove = useCallback((newPosition, movement) => {
-    console.log('Mobile move called:', { newPosition, movement }); // Debug log
-    
     if (movement) {
-      // Movement relative to camera direction
       const { forward, right } = movement;
       
-      // Get CURRENT position instead of stale closure
       setCharacterPosition(prevPosition => {
         const [x, y, z] = prevPosition;
         
-        console.log('Movement vector:', { forward, right, characterRotation }); // Debug log
-        
-        // Calculate movement direction based on character rotation
         const cosRotation = Math.cos(characterRotation);
         const sinRotation = Math.sin(characterRotation);
         
-        // Apply movement relative to where character is facing
         const deltaX = forward * -sinRotation + right * cosRotation;
         const deltaZ = forward * -cosRotation + right * -sinRotation;
         
         const newX = x + deltaX;
         const newZ = z + deltaZ;
         
-        console.log('Position update:', { 
-          from: `[${x.toFixed(2)}, ${z.toFixed(2)}]`, 
-          to: `[${newX.toFixed(2)}, ${newZ.toFixed(2)}]`, 
-          delta: `[${deltaX.toFixed(3)}, ${deltaZ.toFixed(3)}]` 
-        }); // Debug log
-        
-        // Apply boundaries
         const clampedX = Math.max(-8.5, Math.min(8.5, newX));
         const clampedZ = Math.max(-8.5, Math.min(8.5, newZ));
         
         const newPos = [clampedX, y, clampedZ];
         
-        // Only update if position actually changed
-        if (Math.abs(clampedX - x) > 0.001 || Math.abs(clampedZ - z) > 0.001) {
-          console.log('Character position updated to:', `[${clampedX.toFixed(2)}, ${y}, ${clampedZ.toFixed(2)}]`); // Debug log
-        }
-        
         return newPos;
       });
       
-      // Set walking state for animation
       setIsWalking(Math.abs(forward) > 0.01 || Math.abs(right) > 0.01);
     } else if (newPosition) {
-      // Direct position update (fallback)
-      console.log('Direct position update:', newPosition); // Debug log
       setCharacterPosition(newPosition);
       setIsWalking(false);
     }
-  }, [characterRotation, setIsWalking]); // Remove characterPosition from dependencies
+  }, [characterRotation, setIsWalking]);
 
-  // Handle mobile rotation - Smooth camera control
+  // Handle mobile rotation
   const handleMobileRotate = useCallback((axis, delta) => {
     if (axis === 'horizontal') {
       setCharacterRotation(prev => prev + delta);
@@ -618,7 +568,7 @@ export default function VirtualStudio() {
     }
   }, []);
 
-  // Loading states
+  // Loading states - UPDATED TO INCLUDE IMAGE LOADING
   if (loading || authLoading) {
     return <LoadingScreen />;
   }
@@ -649,6 +599,9 @@ export default function VirtualStudio() {
 
   return (
     <>
+      {/* Image Loading Screen - SHOWS UNTIL IMAGES ARE READY */}
+      <GalleryLoadingScreen loadingState={loadingState} />
+
       {/* Admin Toolbar */}
       {(isArtist || !isAdminMode) && (
         <AdminToolbar
@@ -661,58 +614,82 @@ export default function VirtualStudio() {
         />
       )}
 
-      {/* 3D Canvas */}
-      <Canvas 
-        camera={{ position: [0, 1.6, 5], fov: 75 }}
-        shadows
-        style={{ background: '#2c2c2c' }}
-        onCreated={({ gl }) => {
-          gl.domElement.oncontextmenu = (e) => e.preventDefault();
-          gl.domElement.setAttribute('tabindex', '0');
-        }}
-      >
-        <MovementHandler
-          keysPressed={keysPressed}
-          characterPosition={characterPosition}
-          characterRotation={characterRotation}
-          setCharacterPosition={setCharacterPosition}
-          setIsWalking={setIsWalking}
-          setWalkingSpeed={setWalkingSpeed}
-        />
-        
-        <GalleryLighting />
-        <Studio />
-        
-        <Character 
-          position={characterPosition}
-          rotation={characterRotation}
-          cameraRotation={cameraRotation}
-          isWalking={isWalking}
-          walkingSpeed={walkingSpeed}
-        />
-        
-        {/* Render artworks with admin visual cues */}
-        {localArtworks.map((artwork) => (
-          <Portrait
-            key={artwork.id}
-            position={artwork.position}
-            rotation={artwork.rotation}
-            title={artwork.title}
-            id={artwork.id}
-            imageUrl={artwork.imageUrl}
-            isSelected={selectedArtwork === artwork.id}
-            onClick={handleArtworkClick}
-            isAdminMode={isAdminMode}
-            isVisible={artwork.isVisible}
-          />
-        ))}
-      </Canvas>
+      {/* Reload Images Button (for debugging) */}
+      {isAdminMode && (
+        <button
+          onClick={reloadImages}
+          style={{
+            position: 'fixed',
+            top: '80px',
+            right: '20px',
+            background: '#f59e0b',
+            color: 'white',
+            border: 'none',
+            borderRadius: '6px',
+            padding: '8px 12px',
+            fontSize: '12px',
+            cursor: 'pointer',
+            zIndex: 100
+          }}
+        >
+          Reload Images
+        </button>
+      )}
 
-      {/* UI Overlays */}
-      {!isAdminMode && <Instructions />}
+      {/* 3D Canvas - ONLY RENDERS WHEN IMAGES ARE LOADED */}
+      {!loadingState.isLoading && (
+        <Canvas 
+          camera={{ position: [0, 1.6, 5], fov: 75 }}
+          shadows
+          style={{ background: '#2c2c2c' }}
+          onCreated={({ gl }) => {
+            gl.domElement.oncontextmenu = (e) => e.preventDefault();
+            gl.domElement.setAttribute('tabindex', '0');
+          }}
+        >
+          <MovementHandler
+            keysPressed={keysPressed}
+            characterPosition={characterPosition}
+            characterRotation={characterRotation}
+            setCharacterPosition={setCharacterPosition}
+            setIsWalking={setIsWalking}
+            setWalkingSpeed={setWalkingSpeed}
+          />
+          
+          <GalleryLighting />
+          <Studio />
+          
+          <Character 
+            position={characterPosition}
+            rotation={characterRotation}
+            cameraRotation={cameraRotation}
+            isWalking={isWalking}
+            walkingSpeed={walkingSpeed}
+          />
+          
+          {/* Render artworks with preloaded textures */}
+          {localArtworks.map((artwork) => (
+            <Portrait
+              key={artwork.id}
+              position={artwork.position}
+              rotation={artwork.rotation}
+              title={artwork.title}
+              id={artwork.id}
+              texture={getTextureForArtwork(artwork.id)} // PRELOADED TEXTURE
+              isSelected={selectedArtwork === artwork.id}
+              onClick={handleArtworkClick}
+              isAdminMode={isAdminMode}
+              isVisible={artwork.isVisible}
+            />
+          ))}
+        </Canvas>
+      )}
+
+      {/* UI Overlays - ONLY SHOW WHEN GALLERY IS READY */}
+      {!loadingState.isLoading && !isAdminMode && <Instructions />}
       
       {/* Mobile Controls */}
-      {isMobile && !isAdminMode && (
+      {!loadingState.isLoading && isMobile && !isAdminMode && (
         <MobileControls 
           onMove={handleMobileMove}
           onRotate={handleMobileRotate}
@@ -722,7 +699,7 @@ export default function VirtualStudio() {
       )}
 
       {/* Artwork Detail Modal */}
-      {!isAdminMode && (
+      {!loadingState.isLoading && !isAdminMode && (
         <ArtworkDetail 
           artwork={detailArtwork}
           onClose={() => setDetailArtwork(null)}
@@ -730,7 +707,7 @@ export default function VirtualStudio() {
       )}
 
       {/* Admin Edit Panel */}
-      {isAdminMode && editingArtwork && (
+      {!loadingState.isLoading && isAdminMode && editingArtwork && (
         <ArtworkEditPanel
           artwork={{...editingArtwork, artistId: artist.id}}
           onClose={() => setEditingArtwork(null)}
@@ -742,29 +719,31 @@ export default function VirtualStudio() {
       )}
 
       {/* Info Panel */}
-      <div className="version-label">
-        {artist?.display_name}'s Gallery - {localArtworks.length} Artworks
-        {isAdminMode && (
-          <div style={{ fontSize: '0.75rem', marginTop: '0.25rem', color: '#10b981' }}>
-            Admin Mode Active
-          </div>
-        )}
-        {!isPointerLocked.current && !isMobile && !isAdminMode && (
-          <div style={{ fontSize: '0.75rem', marginTop: '0.25rem' }}>
-            Click canvas to enable mouse look
-          </div>
-        )}
-        {isPointerLocked.current && !isMobile && (
-          <div style={{ fontSize: '0.75rem', marginTop: '0.25rem' }}>
-            ESC to exit mouse look
-          </div>
-        )}
-        {selectedArtwork && !isAdminMode && (
-          <div style={{ fontSize: '0.75rem', marginTop: '0.25rem' }}>
-            Click artwork again for details
-          </div>
-        )}
-      </div>
+      {!loadingState.isLoading && (
+        <div className="version-label">
+          {artist?.display_name}'s Gallery - {localArtworks.length} Artworks
+          {isAdminMode && (
+            <div style={{ fontSize: '0.75rem', marginTop: '0.25rem', color: '#10b981' }}>
+              Admin Mode Active
+            </div>
+          )}
+          {!isPointerLocked.current && !isMobile && !isAdminMode && (
+            <div style={{ fontSize: '0.75rem', marginTop: '0.25rem' }}>
+              Click canvas to enable mouse look
+            </div>
+          )}
+          {isPointerLocked.current && !isMobile && (
+            <div style={{ fontSize: '0.75rem', marginTop: '0.25rem' }}>
+              ESC to exit mouse look
+            </div>
+          )}
+          {selectedArtwork && !isAdminMode && (
+            <div style={{ fontSize: '0.75rem', marginTop: '0.25rem' }}>
+              Click artwork again for details
+            </div>
+          )}
+        </div>
+      )}
     </>
   );
 }
